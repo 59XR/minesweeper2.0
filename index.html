@@ -509,12 +509,28 @@
         const DESIGN_WIDTH = 390;
         const DESIGN_HEIGHT = 844;
 
-        function updateGameScale() {
+        function getAvailableViewportSize() {
             const vv = window.visualViewport;
             const vw = vv?.width ?? window.innerWidth;
             const vh = vv?.height ?? window.innerHeight;
-            // 在不裁切任何元素的前提下，尽可能放大到填满可视区域
-            const scale = Math.min(vw / DESIGN_WIDTH, vh / DESIGN_HEIGHT);
+
+            // body 有 safe-area padding，会实际压缩可用空间；这里把 padding 扣掉
+            const cs = window.getComputedStyle(document.body);
+            const pl = parseFloat(cs.paddingLeft) || 0;
+            const pr = parseFloat(cs.paddingRight) || 0;
+            const pt = parseFloat(cs.paddingTop) || 0;
+            const pb = parseFloat(cs.paddingBottom) || 0;
+
+            return {
+                width: Math.max(0, vw - pl - pr),
+                height: Math.max(0, vh - pt - pb),
+            };
+        }
+
+        function updateGameScale() {
+            const { width, height } = getAvailableViewportSize();
+            // 在不裁切任何元素的前提下，尽可能放大（contain）
+            const scale = Math.min(width / DESIGN_WIDTH, height / DESIGN_HEIGHT);
             document.documentElement.style.setProperty('--game-scale', String(scale));
         }
 
