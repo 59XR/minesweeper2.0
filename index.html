@@ -187,7 +187,7 @@
             font-size: 20px;
             font-weight: bold;
             cursor: pointer;
-            touch-action: manipulation;
+            touch-action: none; /* 需要 pointermove 追踪下拉手势 */
             box-sizing: border-box;
             transition: transform 80ms ease, filter 80ms ease;
         }
@@ -513,7 +513,8 @@
             const vv = window.visualViewport;
             const vw = vv?.width ?? window.innerWidth;
             const vh = vv?.height ?? window.innerHeight;
-            const scale = Math.min(1, vw / DESIGN_WIDTH, vh / DESIGN_HEIGHT);
+            // 在不裁切任何元素的前提下，尽可能放大到填满可视区域
+            const scale = Math.min(vw / DESIGN_WIDTH, vh / DESIGN_HEIGHT);
             document.documentElement.style.setProperty('--game-scale', String(scale));
         }
 
@@ -697,7 +698,7 @@
 
         const SWIPE_FLAG_THRESHOLD_PX = 18;
         const SWIPE_MAX_PULL_PX = 34;
-        let activePull = null; // { id, x, y, startY, flaggedBySwipe }
+        let activePull = null; // { id, x, y, startY, flaggedBySwipe, allowSwipeFlag }
 
         function clearPullState(el, { rebound } = { rebound: false }) {
             if (!el) return;
@@ -718,22 +719,27 @@
             const x = parseInt(cell.dataset.x);
             const y = parseInt(cell.dataset.y);
 
-            // 鼠标左键按下仅用于“按住反馈”，真正点击在 pointerup 处理
-            if (e.pointerType === 'mouse') return;
+            // 鼠标：只响应左键“按住下拉插旗”，右键仍用 contextmenu
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
 
-            // 触摸/笔：启用“按住下滑插旗”
-            if (gameOver || revealed[y][x]) return;
-            activePull = { id: e.pointerId, x, y, startY: e.clientY, flaggedBySwipe: false };
+            if (gameOver) return;
+            // 允许在“已揭示数字”上点按（用于九宫格自动展开），但不允许对它做下拉插旗
+            const allowSwipeFlag = !revealed[y][x];
+            activePull = { id: e.pointerId, x, y, startY: e.clientY, flaggedBySwipe: false, allowSwipeFlag };
             try { cell.setPointerCapture(e.pointerId); } catch {}
-            cell.classList.add('pulling');
-            cell.style.setProperty('--pull', '0');
+            if (allowSwipeFlag && !flagged[y][x]) {
+                cell.classList.add('pulling');
+                cell.style.setProperty('--pull', '0');
+            }
         }
 
         function handlePointerMove(e) {
             const cell = e.currentTarget;
             if (!activePull || e.pointerId !== activePull.id) return;
-            if (e.pointerType === 'mouse') return;
             if (gameOver) return;
+            if (!activePull.allowSwipeFlag) return;
+            if (revealed[activePull.y][activePull.x]) return;
+            if (flagged[activePull.y][activePull.x]) return;
 
             const dy = e.clientY - activePull.startY;
             const pullPx = Math.max(0, Math.min(SWIPE_MAX_PULL_PX, dy));
@@ -752,19 +758,18 @@
             const x = parseInt(cell.dataset.x);
             const y = parseInt(cell.dataset.y);
 
-            if (e.pointerType === 'mouse') {
-                // 仅处理鼠标左键点击（右键交给 contextmenu）
-                if (e.button === 0) handleClick(x, y);
+            // 统一逻辑：如果已经下拉插旗，就不要再触发点击；否则当作一次点击
+            if (activePull && e.pointerId === activePull.id) {
+                const didFlag = activePull.flaggedBySwipe;
+                const allowSwipeFlag = activePull.allowSwipeFlag;
+                activePull = null;
+                if (allowSwipeFlag) clearPullState(cell, { rebound: !didFlag });
+                if (!didFlag) handleClick(x, y);
                 return;
             }
 
-            // 触摸/笔：如果已经下滑插旗，就不要再触发点击
-            if (activePull && e.pointerId === activePull.id) {
-                const didFlag = activePull.flaggedBySwipe;
-                activePull = null;
-                clearPullState(cell, { rebound: !didFlag });
-                if (!didFlag) handleClick(x, y);
-            }
+            // 兜底：没有 activePull 时（极少），仍允许鼠标左键点击
+            if (e.pointerType === 'mouse' && e.button === 0) handleClick(x, y);
         }
 
         function handlePointerCancel() {
